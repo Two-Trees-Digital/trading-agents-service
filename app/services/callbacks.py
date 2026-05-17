@@ -111,6 +111,14 @@ class RunRecorderHandler(AsyncCallbackHandler):
     # async runs.
     run_inline = False
 
+    # TT-298: per-agent iteration cap. When the same agent fires more
+    # than this many times in one run, the handler sets `runaway_detected`
+    # and the main astream loop aborts on its next chunk-boundary check.
+    # Defends against TradingAgents' internal retry chains looping a
+    # failing tool call indefinitely. Tunable later via env var if
+    # the legitimate ceiling needs to grow.
+    MAX_AGENT_INVOCATIONS = 20
+
     def __init__(
         self,
         run_id: str,
@@ -122,6 +130,12 @@ class RunRecorderHandler(AsyncCallbackHandler):
         # Track chain run UUIDs so we can correlate start/end pairs and
         # know what agent each chain belongs to.
         self._active: dict[UUID, str] = {}
+        # TT-298: agent invocation counts + runaway flag. on_chain_start
+        # increments per-agent count; main loop checks `runaway_detected`
+        # between chunks and aborts the run if set.
+        self._agent_counts: dict[str, int] = {}
+        self.runaway_detected: bool = False
+        self.runaway_agent: str | None = None
 
     async def on_chain_start(
         self,
@@ -139,6 +153,22 @@ class RunRecorderHandler(AsyncCallbackHandler):
             name_kw=kwargs.get("name"),
         )
         self._active[run_id] = agent_name
+
+        # TT-298: per-agent invocation cap. Increment count; flag a
+        # runaway when the cap is exceeded. The flag is checked at
+        # chunk boundaries in the main astream loop — we don't raise
+        # here because exceptions from callbacks can leak into LangGraph's
+        # retry-on-error path and create the very loop we're trying to
+        # detect. Setting a flag + breaking the outer loop is robust.
+        count = self._agent_counts.get(agent_name, 0) + 1
+        self._agent_counts[agent_name] = count
+        if count > self.MAX_AGENT_INVOCATIONS and not self.runaway_detected:
+            self.runaway_detected = True
+            self.runaway_agent = agent_name
+            logger.warning(
+                "Run %s: agent %s exceeded %d invocations — runaway flagged",
+                self._run_id, agent_name, self.MAX_AGENT_INVOCATIONS,
+            )
         # Live event: agent started. Browser uses this to show a "thinking..."
         # row in the UI immediately, before any output exists.
         await publish_event(
