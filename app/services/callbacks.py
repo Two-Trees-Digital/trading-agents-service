@@ -165,6 +165,17 @@ class RunRecorderHandler(AsyncCallbackHandler):
         # is plain Text since most consumers will render directly.
         content = _outputs_to_text(outputs)
 
+        # TT-298 fix: skip intermediate steps that produced no usable
+        # content. These are tool-call AIMessages (content="" with
+        # additional_kwargs.tool_calls), state-clearing nodes
+        # (msg_clear_*), and similar plumbing. Persisting them flooded
+        # the agent_reports list with noise rows and made MetadataCard
+        # render empty shells. Real analyst output always has non-empty
+        # content; skipping empty ones cleans up both the row list and
+        # the post-pipeline extraction set.
+        if not content.strip():
+            return
+
         # TT-298 — extraction moved out of the callback path. We write
         # the row with null metadata here; the post-pipeline phase in
         # trading_agents_runner.py reads agent_reports back and runs the
@@ -226,9 +237,18 @@ def _outputs_to_text(outputs: dict[str, Any]) -> str:
     Best-effort string serialization of a chain's output dict. Common
     shapes:
       - {"output": "..."}             → just the output
-      - {"messages": [Message(...)]}  → last message content
+      - {"messages": [Message(...)]}  → last message content (may be "")
       - {"final_trade_decision": "..."} → that string
-      - everything else                → str(dict)
+      - everything else                → "" (caller filters)
+
+    TT-298 fix: empty AIMessage content (tool-call or state-mgmt
+    intermediate steps) now returns "" instead of falling through to
+    str(outputs). Falling through dumped the AIMessage __repr__()
+    into agent_reports.content, which the extractor then tried to
+    parse and got nothing from — leaving rows with all-null metadata
+    that rendered as empty MetadataCard shells in the dashboard.
+    Empty string is a meaningful signal — the on_chain_end caller
+    skips persistence + event publishing for empty-content rows.
     """
     if not outputs:
         return ""
@@ -236,11 +256,15 @@ def _outputs_to_text(outputs: dict[str, Any]) -> str:
         return outputs["output"]
     if "messages" in outputs and outputs["messages"]:
         last = outputs["messages"][-1]
-        content = getattr(last, "content", None)
-        if content:
-            return str(content)
-    # TradingAgents-specific terminal state key — included since it's the
-    # one place the upstream library names its final output.
+        content = getattr(last, "content", "")
+        # Return content even when empty — caller skips empty-content
+        # rows. Empty content is the tool-call/intermediate-step signal.
+        if isinstance(content, str):
+            return content
+        return str(content)
+    # TradingAgents-specific terminal state key.
     if "final_trade_decision" in outputs and outputs["final_trade_decision"]:
         return str(outputs["final_trade_decision"])
-    return str(outputs)
+    # Unknown output shape — empty means "skip" rather than dumping a
+    # confusing dict repr into the row.
+    return ""
