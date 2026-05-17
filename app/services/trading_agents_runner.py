@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time
 from datetime import datetime, timezone
 
 import sentry_sdk
@@ -48,6 +50,28 @@ from app.services.pubsub import publish_done, publish_event
 
 
 logger = logging.getLogger(__name__)
+
+
+# TT-298: global run timeout. Wraps the astream loop with a deadline
+# check at chunk boundaries. Default 10 min covers normal runs (3-8 min
+# typical) with margin; tunable via RUN_DEADLINE_SECONDS env var if
+# expensive analyses need longer.
+RUN_DEADLINE_SECONDS = int(os.getenv("RUN_DEADLINE_SECONDS", "600"))
+
+
+# TT-298: typed exceptions distinguish the abort reasons so run_analysis
+# can map each to its own status + user-visible event without nesting
+# generic try/except + string-matching.
+class RunCancelled(Exception):
+    """User/admin cancelled the run via the cancelRun mutation."""
+
+
+class RunTimedOut(Exception):
+    """Run exceeded RUN_DEADLINE_SECONDS."""
+
+
+class RunRunaway(Exception):
+    """An agent fired more times than RunRecorderHandler.MAX_AGENT_INVOCATIONS."""
 
 
 async def run_analysis(
@@ -116,6 +140,41 @@ async def run_analysis(
             {
                 "type": "run_complete",
                 "decision": decision_text,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except RunCancelled:
+        # User/admin cancelled mid-flight. Status was already written
+        # to 'cancelled' by the dashboard's cancelRun mutation; we just
+        # publish the SSE event so the LiveStream panel closes cleanly.
+        logger.info("Run %s cancelled by user", run_id)
+        await publish_event(
+            run_id,
+            {
+                "type":  "run_error",
+                "error": "Cancelled by user",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except RunTimedOut as e:
+        logger.warning("Run %s timed out: %s", run_id, e)
+        await _set_run_status(sessionmaker, run_id, "timed_out", completed=True)
+        await publish_event(
+            run_id,
+            {
+                "type":  "run_error",
+                "error": f"Run timed out: {e}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except RunRunaway as e:
+        logger.warning("Run %s aborted — runaway agent: %s", run_id, e)
+        await _set_run_status(sessionmaker, run_id, "failed", completed=True)
+        await publish_event(
+            run_id,
+            {
+                "type":  "run_error",
+                "error": f"Agent loop detected: {e}",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -188,13 +247,58 @@ async def _execute_pipeline(
     # astream yields per-node deltas. We merge them into final_state for
     # the terminal decision extraction. The callback handles per-step
     # persistence + pub-sub independently.
+    #
+    # TT-298: between each chunk we check three abort conditions:
+    #   1. Deadline exceeded (10 min default; tunable env var)
+    #   2. Cancel requested via dashboard (DB poll on `runs.status`)
+    #   3. Runaway agent (callback flagged on iteration cap)
+    # Each raises a typed exception that run_analysis maps to a
+    # distinct run status + user-visible event.
     final_state: dict = {}
+    start = time.monotonic()
+
     async for chunk in ta.graph.astream(init_state, **args):
+        # 1. Deadline
+        if time.monotonic() - start > RUN_DEADLINE_SECONDS:
+            raise RunTimedOut(
+                f"run exceeded {RUN_DEADLINE_SECONDS}s deadline"
+            )
+
+        # 2. Runaway agent
+        if handler.runaway_detected:
+            raise RunRunaway(
+                f"agent {handler.runaway_agent} exceeded "
+                f"{handler.MAX_AGENT_INVOCATIONS} invocations"
+            )
+
+        # 3. User-initiated cancel — DB-poll the runs row's status.
+        if await _is_cancelled(sessionmaker, run_id):
+            raise RunCancelled("cancelled via dashboard")
+
         if isinstance(chunk, dict):
             final_state.update(chunk)
 
     decision = final_state.get("final_trade_decision") or "(no decision returned)"
     return str(decision)
+
+
+async def _is_cancelled(sessionmaker, run_id: str) -> bool:
+    """
+    True iff the runs row's status has been flipped to 'cancelled' (by
+    the dashboard's cancelRun mutation). Cheap single-column SELECT —
+    fine to call once per astream chunk (~12 chunks per run).
+    """
+    try:
+        async with sessionmaker() as session:
+            result = await session.execute(
+                select(Run.status).where(Run.id == run_id)
+            )
+            status = result.scalar_one_or_none()
+            return status == "cancelled"
+    except Exception as e:
+        # Don't let a transient DB hiccup abort the run.
+        logger.warning("cancel-poll failed for %s: %s", run_id, e)
+        return False
 
 
 def _build_config() -> dict:
