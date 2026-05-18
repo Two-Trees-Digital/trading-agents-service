@@ -1,276 +1,392 @@
-<p align="center">
-  <img src="assets/TauricResearch.png" style="width: 60%; height: auto;">
-</p>
+# 🦉 trading-agents-service — Python Multi-Agent Engine
 
-<div align="center" style="line-height: 1;">
-  <a href="https://arxiv.org/abs/2412.20138" target="_blank"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2412.20138-B31B1B?logo=arxiv"/></a>
-  <a href="https://discord.com/invite/hk9PGKShPK" target="_blank"><img alt="Discord" src="https://img.shields.io/badge/Discord-TradingResearch-7289da?logo=discord&logoColor=white&color=7289da"/></a>
-  <a href="./assets/wechat.png" target="_blank"><img alt="WeChat" src="https://img.shields.io/badge/WeChat-TauricResearch-brightgreen?logo=wechat&logoColor=white"/></a>
-  <a href="https://x.com/TauricResearch" target="_blank"><img alt="X Follow" src="https://img.shields.io/badge/X-TauricResearch-white?logo=x&logoColor=white"/></a>
-  <br>
-  <a href="https://github.com/TauricResearch/" target="_blank"><img alt="Community" src="https://img.shields.io/badge/Join_GitHub_Community-TauricResearch-14C290?logo=discourse"/></a>
-</div>
+> **Tech** | Python 3.13 · FastAPI · LangGraph · OpenAI GPT-4o · SQLAlchemy 2.x async + asyncpg · Alembic · Redis (SSE pub-sub) · FMP · yfinance · SEC EDGAR · Sentry
 
-<div align="center">
-  <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=de">Deutsch</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=es">Español</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=fr">français</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ja">日本語</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ko">한국어</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=pt">Português</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=ru">Русский</a> | 
-  <a href="https://www.readme-i18n.com/TauricResearch/TradingAgents?lang=zh">中文</a>
-</div>
+The Python service powering [Lyceum Fund](https://github.com/Two-Trees-Digital/lyceum-fund)'s multi-agent analysis pipeline and financial-model construction. A FastAPI wrapper around a fork of [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) — adds service-grade persistence, HMAC-auth, observability, structured-output extraction, and the Generate-Critique-Reconcile model-build pipeline.
 
 ---
 
-# TradingAgents: Multi-Agents LLM Financial Trading Framework
+## Overview
 
-## News
-- [2026-05] **TradingAgents v0.2.5** released with the grounded Sentiment Analyst, GPT-5.5 etc. model coverage, Qwen/GLM/MiniMax dual-region support, `TRADINGAGENTS_*` env-var configurability with API-key auto-detection, remote Ollama support, non-US alpha benchmarks, and ticker path-traversal hardening. See [CHANGELOG.md](CHANGELOG.md) for the full list.
-- [2026-04] **TradingAgents v0.2.4** released with structured-output agents (Research Manager, Trader, Portfolio Manager), LangGraph checkpoint resume, persistent decision log, DeepSeek/Qwen/GLM/Azure provider support, Docker, and a Windows UTF-8 encoding fix.
-- [2026-03] **TradingAgents v0.2.3** released with multi-language support, GPT-5.4 family models, unified model catalog, backtesting date fidelity, and proxy support.
-- [2026-03] **TradingAgents v0.2.2** released with GPT-5.4/Gemini 3.1/Claude 4.6 model coverage, five-tier rating scale, OpenAI Responses API, Anthropic effort control, and cross-platform stability.
-- [2026-02] **TradingAgents v0.2.0** released with multi-provider LLM support (GPT-5.x, Gemini 3.x, Claude 4.x, Grok 4.x) and improved system architecture.
-- [2026-01] **Trading-R1** [Technical Report](https://arxiv.org/abs/2509.11420) released, with [Terminal](https://github.com/TauricResearch/Trading-R1) expected to land soon.
+This service has two responsibilities:
 
-<div align="center">
-<a href="https://www.star-history.com/#TauricResearch/TradingAgents&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" />
-   <img alt="TradingAgents Star History" src="https://api.star-history.com/svg?repos=TauricResearch/TradingAgents&type=Date" style="width: 80%; height: auto;" />
- </picture>
-</a>
-</div>
+1. **Multi-agent ticker analysis** — Take a `(user_id, ticker, trade_date)` request, run the full TradingAgents debate pipeline (fundamentals → sentiment → news → technical → bull/bear → trader → risk committee → portfolio manager), persist agent reports + structured metadata, and stream live progress via Server-Sent Events.
 
-> 🎉 **TradingAgents** officially released! We have received numerous inquiries about the work, and we would like to express our thanks for the enthusiasm in our community.
->
-> So we decided to fully open-source the framework. Looking forward to building impactful projects with you!
+2. **Financial-model construction** — Take a ticker and build a complete DCF + comps + earnings model from FMP data + 10-K parsing. Specialized Generate agents own different model fields; Critique agents flag fragile assumptions; Reconciler synthesizes consensus fields; Auditor spot-checks the final output.
 
-<div align="center">
+The service is invoked by Lyceum Fund's Node-side worker over HMAC-signed POST. SSE streams are authenticated via short-lived query-param tokens. All state lives in PostgreSQL — checkpoints, decisions, agent reports, model versions, critique entries — so a container restart resumes cleanly and every decision is reproducible.
 
-🚀 [TradingAgents](#tradingagents-framework) | ⚡ [Installation & CLI](#installation-and-cli) | 🎬 [Demo](https://www.youtube.com/watch?v=90gr5lwjIho) | 📦 [Package Usage](#tradingagents-package) | 🤝 [Contributing](#contributing) | 📄 [Citation](#citation)
+Built to template-grade quality: the `app/` shell (db, auth, observability, routes scaffolding) is intentionally separable from the trading-specific `tradingagents/` library, and will be extracted as `python-temp-pro` once a second Python-service spawned app validates the abstraction.
 
-</div>
+---
 
-## TradingAgents Framework
+## Architecture
 
-TradingAgents is a multi-agent trading framework that mirrors the dynamics of real-world trading firms. By deploying specialized LLM-powered agents: from fundamental analysts, sentiment experts, and technical analysts, to trader, risk management team, the platform collaboratively evaluates market conditions and informs trading decisions. Moreover, these agents engage in dynamic discussions to pinpoint the optimal strategy.
-
-<p align="center">
-  <img src="assets/schema.png" style="width: 100%; height: auto;">
-</p>
-
-> TradingAgents framework is designed for research purposes. Trading performance may vary based on many factors, including the chosen backbone language models, model temperature, trading periods, the quality of data, and other non-deterministic factors. [It is not intended as financial, investment, or trading advice.](https://tauric.ai/disclaimer/)
-
-Our framework decomposes complex trading tasks into specialized roles. This ensures the system achieves a robust, scalable approach to market analysis and decision-making.
-
-### Analyst Team
-- Fundamentals Analyst: Evaluates company financials and performance metrics, identifying intrinsic values and potential red flags.
-- Sentiment Analyst: Aggregates news headlines, StockTwits, and Reddit chatter into a single sentiment read to gauge short-term market mood.
-- News Analyst: Monitors global news and macroeconomic indicators, interpreting the impact of events on market conditions.
-- Technical Analyst: Utilizes technical indicators (like MACD and RSI) to detect trading patterns and forecast price movements.
-
-<p align="center">
-  <img src="assets/analyst.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-### Researcher Team
-- Comprises both bullish and bearish researchers who critically assess the insights provided by the Analyst Team. Through structured debates, they balance potential gains against inherent risks.
-
-<p align="center">
-  <img src="assets/researcher.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-### Trader Agent
-- Composes reports from the analysts and researchers to make informed trading decisions. It determines the timing and magnitude of trades based on comprehensive market insights.
-
-<p align="center">
-  <img src="assets/trader.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-### Risk Management and Portfolio Manager
-- Continuously evaluates portfolio risk by assessing market volatility, liquidity, and other risk factors. The risk management team evaluates and adjusts trading strategies, providing assessment reports to the Portfolio Manager for final decision.
-- The Portfolio Manager approves/rejects the transaction proposal. If approved, the order will be sent to the simulated exchange and executed.
-
-<p align="center">
-  <img src="assets/risk.png" width="70%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-## Installation and CLI
-
-### Installation
-
-Clone TradingAgents:
-```bash
-git clone https://github.com/TauricResearch/TradingAgents.git
-cd TradingAgents
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ HTTP layer (FastAPI on Railway)                                          │
+│                                                                          │
+│   GET  /health              — liveness; Railway healthcheck target      │
+│   GET  /ready               — DB + Redis ping; 503 on either failure    │
+│   POST /analyze             — kick agent pipeline; returns 202          │
+│   POST /build-model         — kick model-build pipeline; returns 202    │
+│   GET  /stream/{run_id}     — SSE stream of agent progress              │
+│                                                                          │
+│   Auth: HMAC on POST (X-Signature + X-Timestamp + body hash)            │
+│         Short-lived query token on /stream (minted by apps/api)         │
+└────────────┬─────────────────────────────────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Agent pipelines (LangGraph + OpenAI)                                     │
+│                                                                          │
+│ Analyze pipeline (POST /analyze):                                        │
+│   1. Analyst team (parallel)                                            │
+│      Fundamentals · Sentiment · News · Technical                         │
+│   2. Researcher debate                                                   │
+│      Bull · Bear · Research Manager (rounds configurable)                │
+│   3. Trader                                                              │
+│      Composes inputs → BUY/SELL/HOLD + sizing + tax framing             │
+│   4. Risk committee                                                      │
+│      Risk Manager · Portfolio Manager (final approval signal)            │
+│   5. Post-pipeline structured extraction                                 │
+│      GPT-4o-mini extracts metrics + sentiment from each agent report    │
+│                                                                          │
+│ Model-build pipeline (POST /build-model):                                │
+│   1. Generate phase (parallel specialized agents)                       │
+│      Fundamentals · Sector · Capital Structure · Valuation · Growth     │
+│      Each owns its slice; structured-output JSON enforced               │
+│   2. Validation (deterministic, three layers)                           │
+│      Schema bounds → Math consistency → Citation enforcement            │
+│   3. Critique phase                                                      │
+│      Bear · Risk Manager · Devil's Advocate flag fragile assumptions    │
+│   4. Reconciliation (consensus fields)                                   │
+│      Research Manager synthesizes terminal growth, ERP, etc.             │
+│   5. LLM auditor (post-validation spot check)                           │
+│      Sanity + internal-consistency flags surface to admin dashboard     │
+└────────────┬─────────────────────────────────────────────────────────────┘
+             │
+             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Data + persistence                                                       │
+│                                                                          │
+│   PostgreSQL (Neon, shared with Node side via SQLAlchemy)               │
+│   ├─ runs / decisions / agent_reports / agent_invocations               │
+│   ├─ company_models / model_versions / model_critiques                  │
+│   └─ Read-only access to portfolio context (positions, tax_lots)        │
+│                                                                          │
+│   Redis (Upstash, pub-sub for SSE)                                      │
+│   ├─ Channel per run_id; agents publish events as they progress         │
+│   └─ /stream/{run_id} subscribes and pipes to the browser EventSource   │
+│                                                                          │
+│   FMP Premium ($79/mo)                                                  │
+│   ├─ Income / balance / cash-flow statements (5y history)               │
+│   ├─ Analyst consensus estimates                                         │
+│   ├─ 10-K filings text                                                  │
+│   ├─ Earnings transcripts                                               │
+│   └─ Insider trades · institutional holdings                            │
+│                                                                          │
+│   Plus: yfinance (price data) · SEC EDGAR (filings) · Finnhub (calendar)│
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Create a virtual environment in any of your favorite environment managers:
-```bash
-conda create -n tradingagents python=3.13
-conda activate tradingagents
+---
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| **Language** | Python 3.13 |
+| **Web framework** | FastAPI + uvicorn |
+| **Agent orchestration** | LangGraph (forked from TauricResearch/TradingAgents) |
+| **LLM** | OpenAI GPT-4o (analysts + trader + critique); GPT-4o-mini (extraction + auditor) |
+| **Database** | SQLAlchemy 2.x async + asyncpg; Alembic for migrations. Shared schema with Node-side Prisma — Node owns DDL, Python reads/writes through SQLAlchemy models that mirror the Prisma schema |
+| **Queue + pub-sub** | Redis (Upstash). SSE event channels per `run_id` |
+| **Auth** | HMAC signature middleware on POST. Stream-token query auth on SSE |
+| **Market data** | `MarketDataProvider` interface; FMP Premium as primary impl; yfinance + SEC EDGAR as supplements |
+| **Observability** | Sentry (shared `two-trees-shared-python` project, tagged per-app) + structured JSON logging |
+| **Container** | Docker; deployed to Railway |
+| **CI/CD** | GitHub Actions — ruff + pytest + Docker-build |
+
+---
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.13
+- PostgreSQL (local or Neon)
+- Redis (local or Upstash)
+- OpenAI API key
+- FMP API key (Premium tier)
+
+### 1. Clone and install
+
+```sh
+git clone https://github.com/Two-Trees-Digital/trading-agents-service.git
+cd trading-agents-service
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
-Install the package and its dependencies:
-```bash
-pip install .
+### 2. Configure environment
+
+Copy `.env.example` to `.env` and fill in:
+
+```env
+# Database (shared with Lyceum Fund)
+DATABASE_URL="postgres://...pooler.neon.tech:5432/..."
+
+# Service-to-service auth (shared with apps/api + apps/worker)
+SERVICE_HMAC_SECRET="..."
+STREAM_TOKEN_SECRET="..."
+
+# Pub-sub for SSE
+REDIS_URL="rediss://...upstash.io"
+
+# LLM
+OPENAI_API_KEY="sk-..."
+
+# Market data
+FMP_API_KEY="..."
+ALPHA_VANTAGE_API_KEY=""        # optional fallback
+
+# Identification (set by Two Trees Platform on deploy)
+APP_SLUG="lyceum-fund"
+NODE_ENV="development"
+
+# Observability
+SENTRY_DSN="https://...@o....ingest.sentry.io/..."
+
+# CORS — comma-separated origins allowed to hit /stream/{run_id}
+CORS_ALLOW_ORIGINS="https://lyceum-fund-app.vercel.app,http://localhost:3000"
 ```
 
-### Docker
+### 3. Run migrations
 
-Alternatively, run with Docker:
-```bash
-cp .env.example .env  # add your API keys
-docker compose run --rm tradingagents
+```sh
+alembic upgrade head
 ```
 
-For local models with Ollama:
-```bash
-docker compose --profile ollama run --rm tradingagents-ollama
+The schema is owned by the Node side's Prisma (Lyceum Fund repo). The Alembic migrations here mirror it and are used for local dev + new-environment bootstrap. In production, Prisma's `migrate deploy` is the source of truth for DDL.
+
+### 4. Start the service
+
+```sh
+uvicorn app.main:app --reload --port 8000
 ```
 
-### Required APIs
+Health check:
 
-TradingAgents supports multiple LLM providers. Set the API key for your chosen provider:
-
-```bash
-export OPENAI_API_KEY=...          # OpenAI (GPT)
-export GOOGLE_API_KEY=...          # Google (Gemini)
-export ANTHROPIC_API_KEY=...       # Anthropic (Claude)
-export XAI_API_KEY=...             # xAI (Grok)
-export DEEPSEEK_API_KEY=...        # DeepSeek
-export DASHSCOPE_API_KEY=...       # Qwen — International (dashscope-intl.aliyuncs.com)
-export DASHSCOPE_CN_API_KEY=...    # Qwen — China (dashscope.aliyuncs.com)
-export ZHIPU_API_KEY=...           # GLM via Z.AI (international)
-export ZHIPU_CN_API_KEY=...        # GLM via BigModel (China, open.bigmodel.cn)
-export MINIMAX_API_KEY=...         # MiniMax — Global (api.minimax.io, M2.x, 204K ctx)
-export MINIMAX_CN_API_KEY=...      # MiniMax — China (api.minimaxi.com, M2.x, 204K ctx)
-export OPENROUTER_API_KEY=...      # OpenRouter
-export ALPHA_VANTAGE_API_KEY=...   # Alpha Vantage
+```sh
+curl http://localhost:8000/health
+# {"ok": true, "service": "trading-agents-service", "env": "development", "app": "lyceum-fund"}
 ```
 
-For enterprise providers (e.g. Azure OpenAI, AWS Bedrock), copy `.env.enterprise.example` to `.env.enterprise` and fill in your credentials.
+### 5. Run an analysis (via HMAC)
 
-For local models, configure Ollama with `llm_provider: "ollama"`. The default endpoint is `http://localhost:11434/v1`; set `OLLAMA_BASE_URL` to point at a remote `ollama-serve`. Pull models with `ollama pull <name>`, and pick "Custom model ID" in the CLI for any model not listed by default.
-
-Alternatively, copy `.env.example` to `.env` and fill in your keys:
-```bash
-cp .env.example .env
-```
-
-### CLI Usage
-
-Launch the interactive CLI:
-```bash
-tradingagents          # installed command
-python -m cli.main     # alternative: run directly from source
-```
-You will see a screen where you can select your desired tickers, analysis date, LLM provider, research depth, and more.
-
-<p align="center">
-  <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-An interface will appear showing results as they load, letting you track the agent's progress as it runs.
-
-<p align="center">
-  <img src="assets/cli/cli_news.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-<p align="center">
-  <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
-</p>
-
-## TradingAgents Package
-
-### Implementation Details
-
-We built TradingAgents with LangGraph to ensure flexibility and modularity. The framework supports multiple LLM providers: OpenAI, Google, Anthropic, xAI, DeepSeek, Qwen (Alibaba DashScope, international and China endpoints), GLM (Zhipu), MiniMax (global + China), OpenRouter, Ollama for local models, and Azure OpenAI for enterprise.
-
-### Python Usage
-
-To use TradingAgents inside your code, you can import the `tradingagents` module and initialize a `TradingAgentsGraph()` object. The `.propagate()` function will return a decision. You can run `main.py`, here's also a quick example:
+The service is normally invoked by Lyceum Fund's worker. For local testing, sign a request manually:
 
 ```python
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
+import hmac, hashlib, time, json, requests
 
-ta = TradingAgentsGraph(debug=True, config=DEFAULT_CONFIG.copy())
+body = json.dumps({"run_id": "test-uuid", "user_id": "...", "ticker": "AAPL", "trade_date": "2026-05-17"})
+ts = str(int(time.time()))
+sig = hmac.new(b"<SERVICE_HMAC_SECRET>", f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
 
-# forward propagate
-_, decision = ta.propagate("NVDA", "2026-01-15")
-print(decision)
+requests.post(
+    "http://localhost:8000/analyze",
+    data=body,
+    headers={"X-Signature": sig, "X-Timestamp": ts, "Content-Type": "application/json"},
+)
 ```
 
-You can also adjust the default configuration to set your own choice of LLMs, debate rounds, etc.
+---
 
-```python
-from tradingagents.graph.trading_graph import TradingAgentsGraph
-from tradingagents.default_config import DEFAULT_CONFIG
+## API surface
 
-config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "openai"        # openai, google, anthropic, xai, deepseek, qwen, qwen-cn, glm, glm-cn, minimax, minimax-cn, openrouter, ollama, azure
-config["deep_think_llm"] = "gpt-5.4"     # Model for complex reasoning
-config["quick_think_llm"] = "gpt-5.4-mini" # Model for quick tasks
-config["max_debate_rounds"] = 2
+### POST /analyze
 
-ta = TradingAgentsGraph(debug=True, config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
-print(decision)
-```
+Kick off a multi-agent analysis. Returns 202 immediately; the pipeline runs in the background and streams progress to `/stream/{run_id}`.
 
-See `tradingagents/default_config.py` for all configuration options.
-
-## Persistence and Recovery
-
-TradingAgents persists two kinds of state across runs.
-
-### Decision log
-
-The decision log is always on. Each completed run appends its decision to `~/.tradingagents/memory/trading_memory.md`. On the next run for the same ticker, TradingAgents fetches the realised return (raw and alpha vs SPY), generates a one-paragraph reflection, and injects the most recent same-ticker decisions plus recent cross-ticker lessons into the Portfolio Manager prompt, so each analysis carries forward what worked and what didn't.
-
-Override the path with `TRADINGAGENTS_MEMORY_LOG_PATH`.
-
-### Checkpoint resume
-
-Checkpoint resume is opt-in via `--checkpoint`. When enabled, LangGraph saves state after each node so a crashed or interrupted run resumes from the last successful step instead of starting over. On a resume run you will see `Resuming from step N for <TICKER> on <date>` in the logs; on a new run you will see `Starting fresh`. Checkpoints are cleared automatically on successful completion.
-
-Per-ticker SQLite databases live at `~/.tradingagents/cache/checkpoints/<TICKER>.db` (override the base with `TRADINGAGENTS_CACHE_DIR`). Use `--clear-checkpoints` to reset all of them before a run.
-
-```bash
-tradingagents analyze --checkpoint           # enable for this run
-tradingagents analyze --clear-checkpoints    # reset before running
-```
-
-```python
-config = DEFAULT_CONFIG.copy()
-config["checkpoint_enabled"] = True
-ta = TradingAgentsGraph(config=config)
-_, decision = ta.propagate("NVDA", "2026-01-15")
-```
-
-## Contributing
-
-We welcome contributions from the community! Whether it's fixing a bug, improving documentation, or suggesting a new feature, your input helps make this project better. If you are interested in this line of research, please consider joining our open-source financial AI research community [Tauric Research](https://tauric.ai/).
-
-Past contributions, including code, design feedback, and bug reports, are credited per release in [`CHANGELOG.md`](CHANGELOG.md).
-
-## Citation
-
-Please reference our work if you find *TradingAgents* provides you with some help :)
-
-```
-@misc{xiao2025tradingagentsmultiagentsllmfinancial,
-      title={TradingAgents: Multi-Agents LLM Financial Trading Framework}, 
-      author={Yijia Xiao and Edward Sun and Di Luo and Wei Wang},
-      year={2025},
-      eprint={2412.20138},
-      archivePrefix={arXiv},
-      primaryClass={q-fin.TR},
-      url={https://arxiv.org/abs/2412.20138}, 
+**Request body:**
+```json
+{
+  "run_id": "uuid",
+  "user_id": "uuid",
+  "ticker": "AAPL",
+  "trade_date": "2026-05-17"
 }
 ```
+
+**Response:** `202 Accepted` with `{"run_id": "...", "status": "queued"}`.
+
+The service writes the `runs` row, then runs the LangGraph pipeline. Agent reports persist to `agent_reports` with extracted metadata in JSONB. Final decision lands in `decisions` with `model_version_id` FK linkage.
+
+### POST /build-model
+
+Build or refresh a master financial model for a ticker.
+
+**Request body:**
+```json
+{
+  "ticker": "AAPL",
+  "trigger": "watchlist_add | quarterly_refresh | event:earnings"
+}
+```
+
+**Response:** `202 Accepted` with `{"company_model_id": "...", "build_status": "queued"}`.
+
+Pipeline runs Generate → Validate → Critique → Reconcile → Audit. New `model_versions` row written on success; `company_models.current_version_id` updated atomically.
+
+### GET /stream/{run_id}
+
+Server-Sent Events stream of pipeline progress. Browser EventSource auth via `?token=<short-lived JWT>` query param. Token minted by `apps/api` from the same `STREAM_TOKEN_SECRET`.
+
+**Event types:**
+- `agent_start` — `{"agent": "fundamentals_analyst"}`
+- `agent_token` — streamed content from the agent's LLM call
+- `agent_end` — `{"agent": "...", "report_id": "..."}`
+- `decision` — final `{"decision": "BUY", "size_pct": 1.5, ...}`
+- `error` — `{"reason": "..."}` for transient failures
+- `done` — pipeline terminated (success or fail)
+
+### GET /health and /ready
+
+Standard liveness + readiness probes. Railway's healthcheck points at `/health`. Load-balancer config should use `/ready` for traffic gating.
+
+---
+
+## Database
+
+Python service writes through SQLAlchemy 2.x async models. Schema mirrors the Lyceum Fund Prisma schema; DDL is owned by Node side. Python tables (writes):
+
+| Table | Purpose |
+|---|---|
+| **runs** | Top-level analyze invocation. Status state machine: pending → running → complete \| cancelled \| timed_out \| error |
+| **agent_invocations** | Per-LLM-call audit: prompt template version, prompt hash, model version string (e.g. `gpt-4o-2024-08-06`), config, seed |
+| **agent_reports** | Markdown content + structured `metadata` JSONB per-agent. Schemas defined in `app/services/extractors/schemas.py` |
+| **decisions** | Final BUY/SELL/HOLD + sizing + tax_consideration + `model_version_id` FK |
+| **model_versions** | Versioned JSONB financial model state |
+| **model_critiques** | Structured dissent rows per field path |
+| **model_quality_alerts** | Auditor flags surfaced to admin |
+
+Python tables (reads only — Node owns writes):
+
+`portfolios`, `accounts`, `positions`, `tax_lots`, `transactions`, `assets`, `user_budgets`, `watchlists`. The pipeline reads portfolio context for prompt injection; never mutates portfolio state.
+
+---
+
+## Project structure
+
+```
+trading-agents-service/
+├── app/
+│   ├── main.py                          ← FastAPI entrypoint, lifecycle, /health, /ready
+│   ├── config.py                        ← pydantic-settings Settings class
+│   ├── db.py                            ← async engine, session, dependency
+│   ├── auth.py                          ← HMAC verification middleware
+│   ├── observability.py                 ← Sentry init
+│   ├── logging_config.py                ← structured JSON logging
+│   ├── models.py                        ← SQLAlchemy 2.x ORM (mirrors Prisma)
+│   ├── routes/
+│   │   ├── analyze.py                   ← POST /analyze
+│   │   ├── build_model.py               ← POST /build-model
+│   │   └── stream.py                    ← GET /stream/{run_id} (SSE)
+│   └── services/
+│       ├── trading_agents_runner.py     ← analyze-pipeline orchestration
+│       ├── model_builder.py             ← Generate→Validate→Critique→Reconcile→Audit
+│       ├── callbacks.py                 ← LangGraph callback handler — writes reports
+│       ├── pubsub.py                    ← Redis pub-sub for SSE
+│       ├── stream_token.py              ← short-lived SSE token verification
+│       ├── redis_client.py              ← async redis factory
+│       └── extractors/
+│           ├── extractor.py             ← GPT-4o-mini structured extraction
+│           └── schemas.py               ← per-agent metadata Pydantic schemas
+├── tradingagents/                       ← upstream library, mostly unmodified
+│   ├── agents/                          ← analyst + researcher + trader + risk
+│   ├── graph/                           ← LangGraph wiring
+│   └── default_config.py
+├── alembic/
+│   ├── env.py
+│   └── versions/                        ← migration scripts
+├── tests/
+├── pyproject.toml
+├── Dockerfile
+├── alembic.ini
+└── .github/workflows/python-deploy.yml
+```
+
+---
+
+## Deployment
+
+**Railway** — auto-deploys on push to `main`. Dockerfile builds the Python service + bundles `tradingagents/` upstream library. Env vars set in Railway service Variables tab. Healthcheck against `/health` with a 30s window.
+
+**GitHub Actions** (`python-deploy.yml`):
+
+| Step | Purpose |
+|---|---|
+| Ruff lint | Style + import-order check |
+| pytest | Unit + integration tests (with a synthetic OpenAI mock) |
+| Docker build | Verifies the image builds; uses BuildKit cache to keep CI under 90s |
+
+**Sentry** — shared `two-trees-shared-python` project for now (works because every event is tagged with `app:<APP_SLUG>`). Dedicated per-app project when traffic justifies it.
+
+---
+
+## Roadmap
+
+The Python service moves in lockstep with [Lyceum Fund](https://github.com/Two-Trees-Digital/lyceum-fund)'s strategic roadmap. The service's work is concentrated in Phases A, D, and E.
+
+**Where we are today:** v1 shipped. Multi-agent analyze pipeline live with structured metadata extraction, SSE streaming, runaway-protection (timeout + iteration cap + cancel-poll). Currently on the Pre-Phase-A: Polish & Operations milestone — token-based cost tracking + heuristic-to-extractor migration. Phase A (decision journal + agent versioning) is the next strategic milestone.
+
+### Pre-Phase-A: Polish & Operations
+
+Operational debt: extract `/analyze` background work to a dedicated Arq worker for restart-safety, replace the `_extract_action` regex heuristic with the structured extractor (TT-296), and adopt real token-usage cost tracking from the LangChain callback (TT-294 — coordinates with Lyceum Fund's UserBudget settlement).
+
+### Phase A — Decision Journal & Outcome Tracking
+
+The service-side contribution: capture full per-invocation context (prompt template version, prompt-rendered hash, OpenAI model version string, config, seed) on every LangGraph node call, write to `agent_invocations` for reproducibility. Two years from now, any decision can be replayed against the exact prompt + model + data snapshot.
+
+### Phase B — Watchlist & Calendar
+
+Minimal service-side work. Event-triggered re-analysis (TT-315) reuses the existing `/analyze` flow via worker enqueue on earnings calendar events.
+
+### Phase C — Portfolio & Brokerage
+
+Service injects portfolio context into agent prompts: a compact JSON summary (top holdings, sector tilts, concentration, recent transactions, tax-lot state) is added to every analyst system prompt. Trader agent's decision schema extends with `position_size_pct`, `max_position_size_pct`, and `tax_consideration` for tax-aware sell recommendations.
+
+### Phase D — Financial Models
+
+The biggest service-side build. Three sub-phases:
+
+- **D-1 Foundation** — Ship the `MarketDataProvider` interface + FMP implementation, the model JSON schema + deterministic validators (schema bounds + math consistency), the single Fundamentals Generate agent that builds a complete model from FMP data + 10-K parse, and citation recording on every value (populated, not yet enforced).
+
+- **D-2 Multi-agent + Dissent** — Split the single Generate agent into specialized owners (Fundamentals · Sector · Capital Structure · Valuation · Growth), each owning specific model fields. Add the Critique phase with structured dissent storage (`model_critiques` table). Flip citation enforcement on. Wire event-driven refresh from FMP earnings calendar + 8-K feed.
+
+- **D-3 Platform Maturity** — Reconciliation agents for consensus fields (terminal growth, equity risk premium). LLM auditor agents above deterministic validation. Sensitivity analysis API for the dashboard's what-if UI.
+
+### Phase E — Risk & Backtesting
+
+Drawdown-aware agent reasoning. When portfolio state is in `WARNING` or `CIRCUIT_BREAKER`, the trader agent's prompt includes a drawdown-context block and the decision is constrained (HOLD-only during circuit breaker). Otherwise the service is mostly read-only from Phase E's perspective — risk metrics and backtest replay live in apps/worker.
+
+### Icebox
+
+Options-aware agent layer — same trigger as Lyceum's options icebox: needs Phase A outcome tracking + Phase C portfolio context + a real options-data subscription (Polygon or Schwab API) before it's worth building.
+
+Full ticket-level detail: [Linear project →](https://linear.app/two-trees-digital/project/lyceum-fund-1427cdb98f49)
+
+---
+
+## References
+
+- [Lyceum Fund](https://github.com/Two-Trees-Digital/lyceum-fund) — the Node-side app that calls this service
+- [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) — upstream open-source framework
+- [FastAPI docs](https://fastapi.tiangolo.com) · [LangGraph docs](https://langchain-ai.github.io/langgraph/) · [SQLAlchemy 2.x async](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html) · [Alembic](https://alembic.sqlalchemy.org)
+- [OpenAI Python SDK](https://github.com/openai/openai-python) · [Financial Modeling Prep API](https://site.financialmodelingprep.com/developer/docs)
+
+---
+
+**Built by Two Trees Digital** 🌲 | [Lyceum Fund](https://lyceum-fund-app.vercel.app) | [GitHub](https://github.com/Two-Trees-Digital/trading-agents-service)
